@@ -227,6 +227,48 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(resolved_default, "webcam:0")
 
 
+class TestLicenseGuard(unittest.TestCase):
+    def test_whitelist_authorization(self):
+        import license_guard
+        with mock.patch("license_guard.get_machine_fingerprint", return_value="PROV-287F-9C86-C291-9A16"):
+            valid, msg, meta = license_guard.verify_license_file()
+            self.assertTrue(valid)
+            self.assertEqual(meta["status"], "WHITELIST_AUTHORIZED")
+
+    def test_wildcard_any_authorization(self):
+        import license_guard
+        import tempfile
+        lic_text = license_guard.generate_license_key("ANY", client_name="Authorized Packing Station", expiry="PERPETUAL")
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            f.write(lic_text)
+            temp_path = f.name
+        try:
+            with mock.patch("license_guard.get_machine_fingerprint", return_value="PROV-TEST-9999-8888-7777"):
+                valid, msg, meta = license_guard.verify_license_file(license_path=temp_path)
+                self.assertTrue(valid)
+                self.assertEqual(meta.get("client"), "Authorized Packing Station")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_self_healing_rebind_authorization(self):
+        import license_guard
+        import tempfile
+        old_lic = license_guard.generate_license_key("PROV-6EF9-6C01-E116-3EF9", "Authorized Packing Station", "PERPETUAL")
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            f.write(old_lic)
+            temp_path = f.name
+        try:
+            with mock.patch("license_guard.get_machine_fingerprint", return_value="PROV-REBIND-1111-2222-3333"):
+                valid, msg, meta = license_guard.verify_license_file(license_path=temp_path)
+                self.assertTrue(valid)
+                self.assertEqual(meta.get("status"), "AUTO_REBOUND")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
 

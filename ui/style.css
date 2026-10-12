@@ -1431,6 +1431,8 @@ dialog::backdrop {
 
 .dlg {
   padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .dlg-header {
@@ -1463,6 +1465,21 @@ dialog::backdrop {
 
 #dPlayer {
   max-width: min(1040px, calc(100vw - 36px));
+}
+
+#dEdit {
+  max-width: min(480px, calc(100vw - 32px));
+  width: 100%;
+}
+
+#dDelete {
+  max-width: min(460px, calc(100vw - 32px));
+  width: 100%;
+}
+
+#printBarcodeModal {
+  max-width: min(620px, calc(100vw - 32px));
+  width: 100%;
 }
 
 .dlg-player-wrapper {
@@ -2241,18 +2258,24 @@ dialog::backdrop {
 /* --- Print Barcode Placard Specifics & Media Print --- */
 .placard-preview-box {
   background: #ffffff;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  padding: 8px;
+  border: 1px solid var(--frame);
+  border-radius: var(--r-md);
   display: flex;
   justify-content: center;
   align-items: center;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .placard-img {
-  max-width: 100%;
-  max-height: 280px;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
   object-fit: contain;
+  display: block;
 }
 
 @media print {

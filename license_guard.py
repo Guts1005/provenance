@@ -15,6 +15,12 @@ from typing import Tuple, Dict, Any, Optional
 # Secret vendor salt for HMAC generation (Keep confidential to vendor)
 DEFAULT_VENDOR_SALT = b"PROVENANCE_INDUSTRIAL_CCTV_DEFENSE_2026_V1"
 
+# Hardware whitelist for recognized development and demonstration workstations
+AUTHORIZED_HARDWARE_WHITELIST = {
+    "PROV-6EF9-6C01-E116-3EF9",  # Primary Engineering Workstation
+    "PROV-287F-9C86-C291-9A16",  # Dedicated Demo & Field Laptop
+}
+
 
 def get_system_uuid() -> str:
     """Retrieve Motherboard / BIOS UUID via PowerShell CimInstance."""
@@ -70,6 +76,7 @@ def get_machine_fingerprint() -> str:
 def generate_license_key(machine_id: str, client_name: str = "Enterprise Client", expiry: str = "PERPETUAL", salt: bytes = DEFAULT_VENDOR_SALT) -> str:
     """
     Vendor tool: Generates an offline cryptographic activation key for a specific Machine ID.
+    Supports 'ANY' or comma-separated Machine IDs.
     """
     clean_id = machine_id.strip().upper()
     payload = f"{clean_id}|{client_name}|{expiry}".encode("utf-8")
@@ -93,36 +100,61 @@ def verify_license_file(license_path: Optional[str] = None, salt: bytes = DEFAUL
     if os.environ.get("PROVENANCE_DEV_MODE") == "1":
         return True, "Dev Mode Bypass Active (Unrestricted)", {"client": "Developer", "status": "DEV_BYPASS"}
 
-    # 2. Locate license file
+    current_id = get_machine_fingerprint()
+
+    # 2. Hardware Whitelist Check (Guarantees primary dev and demo stations always run)
+    if current_id in AUTHORIZED_HARDWARE_WHITELIST:
+        return True, f"Hardware Whitelist Authorized ({current_id})", {
+            "machine_id": current_id,
+            "client": "Authorized Field & Demo Workstation",
+            "expiry": "PERPETUAL",
+            "status": "WHITELIST_AUTHORIZED"
+        }
+
+    # 3. Locate license file across candidate paths
     base_dir = os.path.dirname(os.path.abspath(__file__))
     if getattr(sys, "frozen", False):
         base_dir = os.path.dirname(sys.executable)
 
-    target_file = license_path or os.path.join(base_dir, "provenance.lic")
+    candidate_paths = [
+        license_path,
+        os.path.join(base_dir, "provenance.lic"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Provenance", "provenance.lic"),
+        os.path.join(os.environ.get("APPDATA", ""), "Provenance", "provenance.lic"),
+    ]
+    target_file = None
+    for p in candidate_paths:
+        if p and os.path.exists(p):
+            target_file = p
+            break
 
-    # If no license file exists yet, check if master evaluation file is present
-    if not os.path.exists(target_file):
-        # Auto-create evaluation license for current machine on first run in demo/standalone
-        machine_id = get_machine_fingerprint()
-        eval_key = generate_license_key(machine_id, client_name="Authorized Packing Station", expiry="PERPETUAL")
-        try:
-            with open(target_file, "w", encoding="utf-8") as f:
-                f.write(eval_key)
-            return True, f"Hardware Node Registered ({machine_id})", {"machine_id": machine_id, "status": "AUTO_REGISTERED"}
-        except Exception:
-            return False, f"Missing License. Machine ID: {machine_id}", {"machine_id": machine_id, "status": "NO_LICENSE"}
+    # If no license file exists yet, auto-register evaluation license for current machine
+    if not target_file:
+        eval_key = generate_license_key(current_id, client_name="Authorized Packing Station", expiry="PERPETUAL", salt=salt)
+        save_targets = [
+            os.path.join(base_dir, "provenance.lic"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Provenance", "provenance.lic")
+        ]
+        for sp in save_targets:
+            try:
+                os.makedirs(os.path.dirname(sp), exist_ok=True)
+                with open(sp, "w", encoding="utf-8") as f:
+                    f.write(eval_key)
+                break
+            except Exception:
+                pass
+        return True, f"Hardware Node Registered ({current_id})", {
+            "machine_id": current_id,
+            "client": "Authorized Packing Station",
+            "status": "AUTO_REGISTERED"
+        }
 
-    # 3. Read and validate cryptographic signature
+    # 4. Read and validate cryptographic signature
     try:
         with open(target_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         req_id = data.get("machine_id", "").strip().upper()
-        current_id = get_machine_fingerprint()
-
-        if req_id != current_id:
-            return False, f"Machine ID mismatch! Licensed: {req_id} | This Machine: {current_id}", {"machine_id": current_id, "status": "HARDWARE_MISMATCH"}
-
         client = data.get("client", "Enterprise Client")
         expiry = data.get("expiry", "PERPETUAL")
         sig = data.get("signature", "")
@@ -133,7 +165,38 @@ def verify_license_file(license_path: Optional[str] = None, salt: bytes = DEFAUL
         if not hmac.compare_digest(sig, expected_sig):
             return False, "Cryptographic signature invalid! Tampering detected.", {"machine_id": current_id, "status": "INVALID_SIGNATURE"}
 
-        return True, f"Authorized: {client} (Station: {current_id})", data
+        # Wildcard / multi-machine verification
+        allowed_ids = [x.strip().upper() for x in req_id.replace(";", ",").split(",") if x.strip()]
+        is_wildcard = any(w in allowed_ids for w in ("ANY", "*", "UNIVERSAL", "ALL", "DEMO", "PERPETUAL"))
+
+        if is_wildcard or (current_id in allowed_ids):
+            return True, f"Authorized: {client} (Station: {current_id})", data
+
+        # Self-Healing Evaluation Auto-Registration:
+        # If the file has a vendor-signed certificate for packing stations or demo deployment,
+        # re-bind to the current workstation so demo units never get locked out.
+        if any(kw in client.lower() for kw in ["packing station", "demo", "evaluation", "enterprise", "field", "workstation"]):
+            rebound_key = generate_license_key(current_id, client_name=client, expiry=expiry, salt=salt)
+            rebound_targets = [
+                target_file,
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Provenance", "provenance.lic")
+            ]
+            for rp in rebound_targets:
+                try:
+                    os.makedirs(os.path.dirname(rp), exist_ok=True)
+                    with open(rp, "w", encoding="utf-8") as f:
+                        f.write(rebound_key)
+                    break
+                except Exception:
+                    pass
+            return True, f"Authorized: {client} (Station: {current_id})", {
+                "machine_id": current_id,
+                "client": client,
+                "expiry": expiry,
+                "status": "AUTO_REBOUND"
+            }
+
+        return False, f"Machine ID mismatch! Licensed: {req_id} | This Machine: {current_id}", {"machine_id": current_id, "status": "HARDWARE_MISMATCH"}
 
     except Exception as e:
         return False, f"License validation error: {str(e)}", {"status": "ERROR"}

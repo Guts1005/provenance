@@ -1954,7 +1954,7 @@
 
   window.renderUpdateStatusUI = async function renderUpdateStatusUI(statusData) {
     if (!statusData) return;
-    const curVer = statusData.current_version || "2.0.9";
+    const curVer = statusData.current_version || "2.0.10";
     if ($("#updateVersionBadge")) {
       $("#updateVersionBadge").textContent = "Current: v" + curVer;
     }

@@ -609,7 +609,7 @@
 
   <!-- DIALOG: EDIT METADATA -->
   <dialog id="dEdit" aria-labelledby="eTitle">
-    <div class="dlg" style="max-width:480px">
+    <div class="dlg">
       <div class="dlg-header">
         <h3 id="eTitle">Edit Clip Metadata</h3>
         <button class="btn sm quiet" onclick="closeEditMetadataModal()"><span data-i="x"></span></button>
@@ -644,7 +644,7 @@
 
   <!-- DIALOG: DELETE CONFIRMATION -->
   <dialog id="dDelete" aria-labelledby="dTitle">
-    <div class="dlg" style="max-width:460px">
+    <div class="dlg">
       <h3 id="dTitle">Delete this clip?</h3>
       <p id="dBody" style="margin-top:10px"></p>
       <div class="dlg-actions">
@@ -656,7 +656,7 @@
 
   <!-- DIALOG: PRINT BENCH COMMAND PLACARD -->
   <dialog id="printBarcodeModal" aria-labelledby="printTitle">
-    <div class="dlg" style="max-width:540px">
+    <div class="dlg">
       <div class="dlg-header">
         <h3 id="printTitle">Packing Bench Command Barcode</h3>
         <button class="btn sm quiet" onclick="closePrintBarcodeModal()"><span data-i="x"></span></button>
@@ -669,7 +669,7 @@
         <img id="benchPlacardImg" src="/static/finish_bench_placard.png?v=1" alt="Finish Command Placard" class="placard-img">
       </div>
 
-      <div style="display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin-bottom:12px">
+      <div style="display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin-bottom:14px">
         <div><strong>Code-128:</strong> for 1D laser & CCD guns</div>
         <div><strong>QR Code:</strong> for 2D camera & imager guns</div>
       </div>
