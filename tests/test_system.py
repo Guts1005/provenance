@@ -122,6 +122,61 @@ class TestDatabaseLayer(unittest.TestCase):
         database.complete_session(s3, "2026-09-29T06:02:00Z", 3.0, "", "completed", "TEST")
         database.delete_session(s3)
 
+    def test_create_session_with_clip_info(self):
+        barcode = "TEST-CLIP-INFO-01"
+        cname = "TEST-CLIP-INFO-01_20261012_120000.mp4"
+        cpath = os.path.join(database.CLIPS_DIR, cname)
+        sid = database.create_session(
+            barcode=barcode,
+            station_id="Station 1",
+            camera_source="webcam:0",
+            clip_path=cpath,
+            clip_filename=cname
+        )
+        try:
+            sess = database.get_session_by_id(sid)
+            self.assertIsNotNone(sess)
+            self.assertEqual(sess["status"], "recording")
+            self.assertEqual(sess["clip_path"], cpath)
+            self.assertEqual(sess["clip_filename"], cname)
+        finally:
+            database.complete_session(sid, "2026-10-12T12:00:05Z", 5.0, cpath, "completed", "TEST")
+            database.delete_session(sid)
+
+    def test_reconcile_clips_ignores_active_and_recent_sessions(self):
+        # Create an active recording file on disk
+        cname = "ACTIVE_RACE_TEST_20261012_120000.mp4"
+        cpath = os.path.join(database.CLIPS_DIR, cname)
+        with open(cpath, "wb") as f:
+            f.write(b"ACTIVE_RECORDING_BYTES")
+
+        # Session created with this filename
+        sid = database.create_session(
+            barcode="ACTIVE_RACE_TEST",
+            station_id="Station 1",
+            camera_source="webcam:0",
+            clip_path=cpath,
+            clip_filename=cname
+        )
+        try:
+            # Running reconcile while session is active must NOT create duplicate session
+            rec = database.reconcile_clips_from_disk()
+            self.assertEqual(rec["reconciled"], 0)
+            self.assertNotIn("ACTIVE_RACE_TEST", rec["restored_barcodes"])
+
+            # Verify no second session exists for this barcode
+            with database.get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM sessions WHERE barcode = 'ACTIVE_RACE_TEST'"
+                ).fetchall()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["id"], sid)
+        finally:
+            database.complete_session(sid, "2026-10-12T12:00:05Z", 5.0, cpath, "completed", "TEST")
+            database.delete_session(sid)
+            if os.path.exists(cpath):
+                os.remove(cpath)
+
 
 
 class TestVideoEngine(unittest.TestCase):

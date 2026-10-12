@@ -871,18 +871,23 @@
       upper === "END" ||
       upper.endsWith("FINISH")
     ) {
+      if (barcodeInput) barcodeInput.value = "";
+      scannerBuffer = "";
+      const now = Date.now();
+      if (isFinishingSession || (now - lastFinishTime < 1500)) {
+        return; // Debounce rapid double-scan of 1D/2D placard
+      }
       if (appState === "recording") {
         handleFinishClick();
       } else {
         toast("warn", "No recording in progress to finish.");
         playChime("error");
-        if (barcodeInput) barcodeInput.value = "";
       }
       return;
     }
 
     // Standard parcel barcode
-    if (appState === "idle") {
+    if (appState === "idle" || appState === "saved") {
       triggerBarcodeStart(code);
     } else if (appState === "recording") {
       if (activeSession && activeSession.barcode === code) {
@@ -963,8 +968,15 @@
     triggerBarcodeStart(val);
   };
 
+  let isFinishingSession = false;
+  let lastFinishTime = 0;
+
   window.handleFinishClick = async function () {
-    if (appState !== "recording") return;
+    if (isFinishingSession || appState !== "recording") return;
+    isFinishingSession = true;
+    lastFinishTime = Date.now();
+    if (barcodeInput) barcodeInput.value = "";
+    scannerBuffer = "";
 
     try {
       const resp = await fetch("/api/stop", {
@@ -980,33 +992,13 @@
         activeSession = null;
 
         const durSec = finished.duration_seconds || 0;
-        const bc = finished.barcode || (barcodeInput ? barcodeInput.value.trim() : "PKG");
+        const bc = finished.barcode || "PKG";
         setStationState("saved", bc, durSec);
         toast("ok", "Clip saved for " + bc + " (" + fmt(durSec) + ")");
 
         if (barcodeInput) {
           barcodeInput.value = "";
           setTimeout(() => barcodeInput.focus(), 100);
-        }
-
-        // Optimistic real-time entry in recent clips list
-        const optId = finished.id || finished.session_id || Date.now();
-        const optItem = {
-          id: optId,
-          barcode: bc,
-          order_id: finished.order_id || "",
-          carrier: finished.carrier || "",
-          start_time: new Date().toISOString(),
-          duration_seconds: durSec,
-          file_size_bytes: finished.file_size_bytes || 0,
-          status: "completed",
-          clip_filename: finished.clip_filename || (bc + ".mp4")
-        };
-        if (!allSessions.some(s => s.id === optId)) {
-          allSessions.unshift(optItem);
-          renderRecentClips(allSessions);
-          renderRibbon(allSessions);
-          renderArchiveRows();
         }
 
         // Staggered loadSessions calls as background FFmpeg/OpenCV writer flushes MP4 to disk
@@ -1018,10 +1010,16 @@
       } else {
         playChime("error");
         toast("warn", data.error || "Failed to stop recording.");
+        setStationState("idle");
       }
     } catch (e) {
       playChime("error");
       toast("danger", "Connection error stopping session.");
+      setStationState("idle");
+    } finally {
+      setTimeout(() => {
+        isFinishingSession = false;
+      }, 1200);
     }
   };
 
@@ -1177,7 +1175,18 @@
       const resp = await fetch("/api/sessions?limit=100");
       if (resp.ok) {
         const data = await resp.json();
-        allSessions = Array.isArray(data) ? data : (data.sessions || []);
+        const rawList = Array.isArray(data) ? data : (data.sessions || []);
+        const seenIds = new Set();
+        const seenFiles = new Set();
+        allSessions = rawList.filter(s => {
+          if (!s || !s.id) return false;
+          if (seenIds.has(s.id)) return false;
+          seenIds.add(s.id);
+          const fname = (s.clip_filename || "").trim().toLowerCase();
+          if (fname && seenFiles.has(fname)) return false;
+          if (fname) seenFiles.add(fname);
+          return true;
+        });
         renderArchiveRows();
         renderRibbon(allSessions);
         renderRecentClips(allSessions);
@@ -1954,7 +1963,7 @@
 
   window.renderUpdateStatusUI = async function renderUpdateStatusUI(statusData) {
     if (!statusData) return;
-    const curVer = statusData.current_version || "2.0.10";
+    const curVer = statusData.current_version || "2.0.11";
     if ($("#updateVersionBadge")) {
       $("#updateVersionBadge").textContent = "Current: v" + curVer;
     }

@@ -1183,7 +1183,14 @@ class VideoEngine:
             clip_path = os.path.join(database.get_clips_dir(), filename)
 
             station_id = database.get_setting("station_id", "Station 1")
-            session_id = database.create_session(barcode, station_id, self.camera_source, iso_start)
+            session_id = database.create_session(
+                barcode=barcode,
+                station_id=station_id,
+                camera_source=self.camera_source,
+                start_time=iso_start,
+                clip_path=clip_path,
+                clip_filename=filename
+            )
 
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             writer = cv2.VideoWriter(clip_path, fourcc, self.target_fps, (self.frame_width, self.frame_height))

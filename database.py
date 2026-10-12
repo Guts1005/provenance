@@ -365,9 +365,20 @@ def _reconcile_clips_from_disk_internal(conn: sqlite3.Connection, clips_dir: Opt
     camera_source = camera_row["value"] if camera_row else "webcam:0"
 
     existing_filenames = set()
-    for r in conn.execute("SELECT clip_filename FROM sessions WHERE clip_filename IS NOT NULL").fetchall():
+    for r in conn.execute("SELECT clip_filename, clip_path FROM sessions WHERE clip_filename IS NOT NULL OR clip_path IS NOT NULL").fetchall():
         if r["clip_filename"]:
             existing_filenames.add(r["clip_filename"].lower())
+        if r["clip_path"]:
+            existing_filenames.add(os.path.basename(r["clip_path"]).lower())
+
+    try:
+        import video_engine
+        if hasattr(video_engine, "engine") and video_engine.engine:
+            active_cp = getattr(video_engine.engine, "active_clip_path", None)
+            if active_cp:
+                existing_filenames.add(os.path.basename(active_cp).lower())
+    except Exception:
+        pass
 
     files = [f for f in os.listdir(clips_dir) if f.lower().endswith(".mp4")]
     scanned_count = len(files)
@@ -381,6 +392,9 @@ def _reconcile_clips_from_disk_internal(conn: sqlite3.Connection, clips_dir: Opt
 
         fpath = os.path.join(clips_dir, fname)
         try:
+            # Skip files created/modified within last 10s (actively being written or converted)
+            if abs(time.time() - os.path.getmtime(fpath)) < 10.0:
+                continue
             fsize = os.path.getsize(fpath)
         except OSError:
             continue
@@ -464,17 +478,26 @@ def reconcile_clips_from_disk(target_dir: Optional[str] = None) -> Dict[str, Any
         return _reconcile_clips_from_disk_internal(conn, clips_dir)
 
 
-def create_session(barcode: str, station_id: str, camera_source: str, start_time: Optional[str] = None) -> int:
+def create_session(
+    barcode: str,
+    station_id: str,
+    camera_source: str,
+    start_time: Optional[str] = None,
+    clip_path: Optional[str] = None,
+    clip_filename: Optional[str] = None
+) -> int:
     """Record scan start event and create active session."""
     if not start_time:
         start_time = datetime.utcnow().isoformat() + "Z"
+    if clip_path and not clip_filename:
+        clip_filename = os.path.basename(clip_path)
     with get_connection() as conn:
         cur = conn.execute(
             """
-            INSERT INTO sessions (barcode, station_id, camera_source, start_time, status)
-            VALUES (?, ?, ?, ?, 'recording')
+            INSERT INTO sessions (barcode, station_id, camera_source, start_time, clip_path, clip_filename, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'recording')
             """,
-            (barcode.strip(), station_id, camera_source, start_time)
+            (barcode.strip(), station_id, camera_source, start_time, clip_path or "", clip_filename or "")
         )
         session_id = cur.lastrowid
         conn.execute(

@@ -287,11 +287,6 @@ def list_sessions():
     response.content_type = "application/json"
     query = request.query.get("q", "").strip()
     sessions = database.search_sessions(query=query, limit=100)
-    if not sessions and not query:
-        # Auto-reconcile on initial empty load if physical clips exist on disk
-        rec = database.reconcile_clips_from_disk()
-        if rec.get("reconciled", 0) > 0:
-            sessions = database.search_sessions(query=query, limit=100)
     return json.dumps({"sessions": sessions, "count": len(sessions)})
 
 
