@@ -63,7 +63,7 @@ class TestServerRestAPI(unittest.TestCase):
             with urllib.request.urlopen(req) as resp:
                 self.assertEqual(resp.status, 200)
                 data = json.loads(resp.read().decode())
-                if data.get("is_connected") or data.get("connection_error"):
+                if data.get("is_connected"):
                     break
             time.sleep(0.3)
 
