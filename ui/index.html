@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Provenance - Industrial CCTV Proof & Packing Station</title>
+  <link rel="stylesheet" href="/static/fonts.css">
+  <link rel="stylesheet" href="/static/style.css?v=34">
+</head>
+<body data-state="idle">
+
+  <!-- Application Header -->
+  <header class="hdr">
+    <div class="hdr-in">
+      <div class="brand">
+        <!-- Clipped-corner label-stock icon -->
+        <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+          <polygon points="0,0 19,0 26,7 26,26 0,26" fill="var(--frame)"/>
+          <text x="13" y="20.5" text-anchor="middle" font-family="var(--f-display)" font-weight="800" font-size="20" fill="var(--surface)">P</text>
+        </svg>
+        <span class="brand-name">PROVENANCE</span>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button class="tab" role="tab" id="tabStationBtn" aria-selected="true" data-view="station" onclick="switchView('station')">Station</button>
+        <button class="tab" role="tab" id="tabManifestBtn" aria-selected="false" data-view="manifest" onclick="switchView('manifest')">Dispatch Manifest <span id="manifestPill" style="display:inline-block;padding:2px 7px;border-radius:10px;background:rgba(16,185,129,0.15);color:#10b981;font-size:10px;font-weight:700">0/0</span></button>
+        <button class="tab" role="tab" id="tabArchiveBtn" aria-selected="false" data-view="archive" onclick="switchView('archive')">Clips Archive</button>
+        <button class="tab" role="tab" id="tabSettingsBtn" aria-selected="false" data-view="settings" onclick="switchView('settings')">Settings <span id="tabSettingsUpdateBadge" class="update-pill" style="display:none">v2.0.2</span></button>
+      </nav>
+
+      <div class="hdr-r">
+        <span class="clock" id="clock" aria-label="System clock">00:00:00</span>
+        <button class="btn sm" id="printBarcodeBtn" title="Print Hands-Free Bench Placard" onclick="openPrintBarcodeModal()">
+          <span data-i="barcode"></span>Finish barcode
+        </button>
+        <button class="btn sm" id="openFolderBtn" title="Open Video Clips in Windows Explorer" onclick="openClipsFolder()">
+          <span data-i="folder"></span>Open folder
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- VIEW 1: STATION -->
+    <section id="v-station" class="station">
+      <div class="col">
+        <!-- Station Update Available Banner -->
+        <div id="stationUpdateBanner" class="station-update-banner" style="display:none">
+          <div class="banner-content">
+            <span class="banner-badge">UPDATE AVAILABLE</span>
+            <span class="banner-text">A newer release (<strong id="bannerNewVersionTag">v2.0.3</strong>) is available for this workstation.</span>
+          </div>
+          <button class="btn sm primary" type="button" onclick="navigateToUpdates()">View &amp; Install Update</button>
+        </div>
+
+        <!-- Live Station Status Band (Full-Bleed Solid Signage) -->
+        <section class="band" id="band" data-state="idle" aria-live="polite">
+          <div class="tile" id="bandIcon"></div>
+          <div>
+            <h2 id="bandTitle">Ready to scan</h2>
+            <div class="sub" id="bandSub">Scan a parcel barcode to start recording.</div>
+          </div>
+          <div>
+            <span class="code" id="bandCode"></span>
+            <button class="btn sm retry" id="retryCamBtn" onclick="testCameraConnection()">Retry connection</button>
+          </div>
+          <div class="timer" id="timer">00:00</div>
+        </section>
+
+        <!-- CCTV Camera Viewport -->
+        <section class="viewport" id="viewport" data-state="idle">
+          <div class="feed" id="viewportFeed">
+            <img id="liveStream" class="live" src="/api/camera/stream" alt="Live CCTV Stream">
+            
+            <!-- Offline No-Signal Graphic -->
+            <div id="nosignal">
+              <svg viewBox="0 0 640 360" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+                <rect width="640" height="360" fill="#0D0E10"/>
+                <text x="320" y="170" text-anchor="middle" fill="#fff" fill-opacity=".8" font-size="22" font-family="var(--f-ui)" font-weight="600">Camera Feed Offline</text>
+                <text x="320" y="200" text-anchor="middle" fill="#fff" fill-opacity=".5" font-size="13" font-family="var(--f-ui)">RTSP stream unreachable. Check cable or network connection.</text>
+              </svg>
+            </div>
+
+            <!-- Optical Corner Framing HUD (Framing marks only, no duplicate OSD text) -->
+            <svg class="live-overlay" viewBox="0 0 640 360" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+              <g fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="2">
+                <path d="M14 40V14h26"/>
+                <path d="M600 14h26v26"/>
+                <path d="M14 320v26h26"/>
+                <path d="M626 320v26h-26"/>
+              </g>
+            </svg>
+
+            <!-- Live Tally Lamp (Pulsing Orange) -->
+            <div class="tally" id="viewportTally"><i></i>REC</div>
+
+            <!-- Fullscreen Button -->
+            <button class="fs-btn" id="liveFsBtn" title="Toggle Fullscreen [F]" onclick="toggleLiveCameraFullscreen()" aria-label="Toggle Fullscreen">
+              <span data-i="expand"></span> <span>Fullscreen</span>
+            </button>
+          </div>
+
+          <!-- Bottom Camera Quick Bar -->
+          <div class="qbar">
+            <div class="seg" id="srcSeg" role="group" aria-label="Camera source">
+              <button id="srcWebcamBtn" aria-pressed="false" data-src="webcam:0" onclick="quickSwitchCamera('webcam:0')">Webcam</button>
+              <button id="srcRtspBtn" aria-pressed="true" data-src="rtsp" onclick="quickSwitchCamera('rtsp')">CCTV RTSP</button>
+            </div>
+            <div class="tele" id="telemetryBox" aria-label="Stream telemetry">
+              <span class="dot" id="teleDot"></span>
+              <span class="v" id="teleRes">1920x1080</span>
+              <span class="rule"></span>
+              <span class="v" id="teleFps">30.0 fps</span>
+              <span class="rule"></span>
+              <span class="v" id="teleLag" style="color:#22c55e;font-size:11px">Lag: &lt;40ms</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Shift Activity & Pacing Ribbon (The Tape Measure) -->
+        <section class="card ribbon" aria-label="Shift activity">
+          <div class="metrics">
+            <div class="m"><b id="mCount">0</b>parcels</div>
+            <div class="m"><b id="mAvg">00:00</b>average</div>
+            <div class="m">
+              <span class="pace" id="mPaceWrap">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                <b id="mRate" style="font-size:28px;color:var(--pallet-ink)">0.0</b>
+              </span>
+              per hour
+            </div>
+          </div>
+          <div class="track" id="track" aria-label="Parcel timeline, shift window">
+            <div class="playhead" id="playhead"></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Operator Bench Control Panel -->
+      <div class="col">
+        <!-- Barcode Bench Card -->
+        <section class="card bench">
+          <label class="lbl" for="barcode">Barcode</label>
+          <input class="field" id="barcode" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="Scan or type" autofocus>
+          <div class="row">
+            <button class="btn primary lg" id="start" onclick="handleStartClick()">Start scan</button>
+            <button class="btn primary lg" id="finish" disabled onclick="handleFinishClick()">
+              Finish <span class="kbd">Enter</span>
+            </button>
+          </div>
+          <div class="chips">
+            <span class="lead">Try</span>
+            <button class="chip" data-code="8906012345678" onclick="simulateScan('8906012345678')">8906012345678</button>
+            <button class="chip" data-code="8901234500017" onclick="simulateScan('8901234500017')">8901234500017</button>
+            <button class="chip" data-code="ORD-1042-A" onclick="simulateScan('ORD-1042-A')">ORD-1042-A</button>
+            <button class="chip chip-cmd" data-code="FINISH" title="Simulate scanning wireless FINISH barcode" onclick="simulateScan('FINISH')">FINISH [Cmd]</button>
+          </div>
+        </section>
+
+        <!-- Recent Finished Clips -->
+        <section class="card clips">
+          <h3>Recent finished clips</h3>
+          <div id="clipList">
+            <div class="empty">No clips recorded yet. Scan a parcel to record one.</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- VIEW: DISPATCH MANIFEST -->
+    <section id="v-manifest" hidden>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <!-- Progress Summary Card -->
+        <div class="card" style="padding:20px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:12px">
+            <div>
+              <h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Daily Dispatch Manifest</h2>
+              <div style="color:var(--pallet-muted);font-size:13px">Import scheduled shipments to track packing fulfillment against physical scans in real time.</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="manifestFileInput" accept=".csv,.txt" style="display:none" onchange="handleManifestFileSelected(event)">
+              <button class="btn primary" type="button" onclick="document.getElementById('manifestFileInput').click()">
+                <span data-i="file"></span> Import Manifest CSV
+              </button>
+              <button class="btn" type="button" onclick="clearManifestData()">
+                <span data-i="trash"></span> Clear Manifest
+              </button>
+              <button class="btn" type="button" onclick="loadManifestData()">
+                <span data-i="refresh"></span> Refresh
+              </button>
+            </div>
+          </div>
+
+          <!-- Progress Bar & Metrics -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px">
+            <div style="background:var(--pallet-panel);padding:12px;border-radius:8px;border:1px solid var(--pallet-line)">
+              <div style="font-size:11px;font-weight:700;color:var(--pallet-muted);text-transform:uppercase;margin-bottom:4px">Total Scheduled</div>
+              <div id="mStatTotal" style="font-size:24px;font-weight:800;color:var(--pallet-ink)">0</div>
+            </div>
+            <div style="background:var(--pallet-panel);padding:12px;border-radius:8px;border:1px solid var(--pallet-line)">
+              <div style="font-size:11px;font-weight:700;color:var(--pallet-muted);text-transform:uppercase;margin-bottom:4px">Packed &amp; Verified</div>
+              <div id="mStatPacked" style="font-size:24px;font-weight:800;color:#10b981">0</div>
+            </div>
+            <div style="background:var(--pallet-panel);padding:12px;border-radius:8px;border:1px solid var(--pallet-line)">
+              <div style="font-size:11px;font-weight:700;color:var(--pallet-muted);text-transform:uppercase;margin-bottom:4px">Pending Dispatch</div>
+              <div id="mStatPending" style="font-size:24px;font-weight:800;color:#f59e0b">0</div>
+            </div>
+            <div style="background:var(--pallet-panel);padding:12px;border-radius:8px;border:1px solid var(--pallet-line)">
+              <div style="font-size:11px;font-weight:700;color:var(--pallet-muted);text-transform:uppercase;margin-bottom:4px">Fulfillment Rate</div>
+              <div id="mStatPercent" style="font-size:24px;font-weight:800;color:var(--pallet-primary)">0.0%</div>
+            </div>
+          </div>
+
+          <div style="height:8px;background:var(--pallet-panel);border-radius:4px;overflow:hidden;border:1px solid var(--pallet-line)">
+            <div id="manifestProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#059669);transition:width 0.4s ease"></div>
+          </div>
+        </div>
+
+        <!-- Manifest Items Table -->
+        <div class="card tbl-wrap" style="padding:0">
+          <table>
+            <thead>
+              <tr>
+                <th>Tracking / Barcode</th>
+                <th>Order ID</th>
+                <th>Recipient / Customer</th>
+                <th>SKU</th>
+                <th>Fulfillment Status</th>
+                <th>Packed At (UTC)</th>
+                <th style="text-align:right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="manifestRows">
+              <tr>
+                <td colspan="7" style="text-align:center;padding:32px;color:var(--pallet-muted)">
+                  No manifest loaded. Click "Import Manifest CSV" above to upload scheduled dispatches.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: CLIPS ARCHIVE -->
+    <section id="v-archive" hidden>
+      <div class="toolbar">
+        <input class="field plain" id="q" type="search" placeholder="Search barcode, order, or serial..." aria-label="Search clips" oninput="debounceSearch()">
+        <button class="btn" id="openClipsFolderBtn" onclick="openClipsFolderInExplorer()" title="Open the video clips storage folder in Windows File Explorer"><span data-i="folder"></span>Open Clips Folder</button>
+        <button class="btn" id="exportPackageBtn" onclick="exportEvidencePackage()" title="Export complete dispute evidence ZIP containing video clips, metadata, and SHA-256 certificate directly to Downloads"><span data-i="shield"></span>Export Evidence Package</button>
+        <button class="btn" id="bulkDeleteBtn" style="display:none" onclick="confirmBatchDelete()"><span data-i="trash"></span>Delete selected (<span id="bulkDeleteCount">0</span>)</button>
+        <button class="btn" id="exportCsvBtn" onclick="exportDisputeCsv()" title="Export dispute CSV manifest directly to Downloads and reveal in Explorer"><span data-i="file"></span>Export CSV</button>
+        <button class="btn" id="syncClipsBtn" onclick="reconcileClipsFromDisk()" title="Scan clips storage directory for missing or restored video files"><span data-i="folder"></span>Sync Folder</button>
+        <button class="btn" id="refreshArchiveBtn" onclick="loadSessions()"><span data-i="refresh"></span>Refresh</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:44px"><input type="checkbox" id="selAll" aria-label="Select all" onchange="toggleSelectAll(this.checked)"></th>
+              <th>Barcode</th>
+              <th>Order / Carrier</th>
+              <th>Recorded</th>
+              <th>Duration</th>
+              <th>Size</th>
+              <th>Flag</th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="8" class="empty" style="text-align:center;padding:24px">Loading clips archive...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- VIEW 3: SETTINGS -->
+    <section id="v-settings" hidden>
+      <div class="settings-head">
+        <div>
+          <h2 class="settings-title">System Settings</h2>
+          <div class="settings-desc">Manage camera hardware, video storage retention, interface appearance, and automatic updates.</div>
+        </div>
+      </div>
+
+      <!-- Theme Switcher -->
+      <div class="card panel">
+        <h3 class="sec-h">Theme</h3>
+        <div class="seg" id="themeSeg" role="group" aria-label="Theme">
+          <button data-t="system" aria-pressed="true" onclick="setAppTheme('system')">System</button>
+          <button data-t="light" aria-pressed="false" onclick="setAppTheme('light')">Light</button>
+          <button data-t="dark" aria-pressed="false" onclick="setAppTheme('dark')">Dark</button>
+        </div>
+      </div>
+
+      <!-- Hardware & CCTV Configuration -->
+      <div class="card panel">
+        <h3 class="sec-h">Hardware & Camera Source</h3>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label class="lbl" for="detectedCamerasSelect">Detected Camera Hardware</label>
+            <div class="camera-hardware-row">
+              <div class="select-wrapper">
+                <select class="field plain select-custom" id="detectedCamerasSelect" onchange="selectDetectedCamera(this.value)">
+                  <option value="">-- Choose Detected Camera --</option>
+                </select>
+              </div>
+              <button class="btn" id="scanCamerasBtn" type="button" onclick="scanAvailableCameras()"><span data-i="refresh"></span>Scan Cameras</button>
+            </div>
+          </div>
+
+          <div class="form-group full">
+            <label class="lbl">Ingestion Source</label>
+            <div class="seg" id="configSourceSeg" style="width:fit-content">
+              <button id="radioSourceWebcam" data-src="webcam:0" aria-pressed="false" onclick="setConfigCameraSource('webcam:0')">Direct USB / Webcam</button>
+              <button id="radioSourceRtsp" data-src="rtsp" aria-pressed="true" onclick="setConfigCameraSource('rtsp')">CCTV RTSP Network Camera</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="lbl" for="rtspIpInput">Camera IP</label>
+            <input class="field plain" id="rtspIpInput" type="text" value="192.168.0.250" oninput="syncRtspBuilder()">
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="rtspPortInput">RTSP Port</label>
+            <input class="field plain" id="rtspPortInput" type="number" value="554" oninput="syncRtspBuilder()">
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="rtspChannelSelect">Camera Preset / Channel</label>
+            <select class="field plain" id="rtspChannelSelect" onchange="syncRtspBuilder()">
+              <option value="/Streaming/Channels/101">Hikvision / Ezviz Main Stream (1080p High-Res)</option>
+              <option value="/Streaming/Channels/102">Hikvision / Ezviz Sub Stream (Standard Res)</option>
+              <option value="/cam/realmonitor?channel=1&subtype=0">Dahua / Imou Main Stream</option>
+              <option value="/cam/realmonitor?channel=1&subtype=1">Dahua / Imou Sub Stream</option>
+              <option value="/unicast/c1/s0/live">Uniview High-Res Main</option>
+              <option value="/axis-media/media.amp">Axis Network Camera</option>
+              <option value="/live/ch0">Generic ONVIF / RTSP (/live/ch0)</option>
+              <option value="/h264Preview_01_main">Reolink (/h264Preview_01_main)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="rtspUserInput">RTSP Username</label>
+            <input class="field plain" id="rtspUserInput" type="text" value="admin" oninput="syncRtspBuilder()">
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="rtspPassInput">RTSP Password</label>
+            <input class="field plain" id="rtspPassInput" type="password" placeholder="Camera Password" oninput="syncRtspBuilder()">
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="rtspUrlInput">Resolved RTSP Stream URL</label>
+            <input class="field plain" id="rtspUrlInput" type="text" placeholder="rtsp://admin:pass@ip:554/...">
+          </div>
+          <div class="form-group full" style="display:flex;gap:10px;align-items:center;margin-top:6px">
+            <button class="btn" id="testRtspBtn" onclick="testCameraConnection()"><span data-i="refresh"></span>Test Connection</button>
+            <div id="rtspTestResult" style="font-size:13px;font-weight:600"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Station & Storage Configuration -->
+      <div class="card panel">
+        <h3 class="sec-h">Station & Storage</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="lbl" for="stationIdInput">Station ID</label>
+            <input class="field plain" id="stationIdInput" type="text" value="Station 1">
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="timeoutInput">Idle Timeout (seconds)</label>
+            <input class="field plain" id="timeoutInput" type="number" value="300">
+          </div>
+          <div class="form-group full">
+            <label class="lbl" for="clipsDirInput">Video Clips Directory</label>
+            <div style="display:flex;gap:8px">
+              <input class="field plain" id="clipsDirInput" type="text" style="flex:1" placeholder="C:\Provenance\Clips">
+              <button class="btn" onclick="openClipsFolder()"><span data-i="folder"></span>Open</button>
+            </div>
+          </div>
+          <div class="form-group full" style="display:flex;justify-content:flex-end;margin-top:10px">
+            <button class="btn primary" onclick="saveSettings()"><span data-i="check"></span>Save Configuration</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Software Version & Automatic Updates -->
+      <div class="card panel" id="updatePanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div>
+            <h3 class="sec-h" style="margin-bottom:4px">Software Updates</h3>
+            <div style="font-size:12px;color:var(--ink-2)">
+              Keep packing stations protected with the latest updates and improvements.
+            </div>
+          </div>
+          <div id="updateVersionBadge" style="background:var(--recess);color:var(--ink);padding:4px 10px;border-radius:4px;font-family:var(--f-mono);font-size:12px;font-weight:700;border:1px solid var(--line)">
+            Current: v2.0.3
+          </div>
+        </div>
+
+        <!-- Status & Action Box -->
+        <div style="background:var(--canvas);border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div id="updateStatusTitle" style="font-size:14px;font-weight:700;color:var(--ink)">System Up To Date</div>
+              <div id="updateStatusDetail" style="font-size:12px;color:var(--ink-2)">Running v2.0.3. Ready for packing operations.</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn" id="checkUpdateBtn" type="button" onclick="triggerUpdateCheck()">
+                <span data-i="refresh"></span> Check for Updates
+              </button>
+            </div>
+          </div>
+
+          <!-- Radar Scan Line Animation (Visible while checking) -->
+          <div id="updateCheckingBar" class="check-radar-bar" style="display:none"></div>
+
+          <!-- Pending Update Card (Shown when update_available) -->
+          <div id="updateAvailableBox" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:12px;font-weight:700;color:var(--pallet-text);letter-spacing:0.5px">NEW VERSION AVAILABLE</span>
+                  <span id="newVersionTag" style="background:var(--pallet);color:#fff;padding:2px 8px;border-radius:3px;font-size:12px;font-family:var(--f-mono);font-weight:700">v2.1.0</span>
+                  <span id="newVersionDate" style="font-size:11px;color:var(--ink-3)"></span>
+                </div>
+                <div id="newVersionSize" style="font-size:12px;color:var(--ink-2);margin-top:4px">Package Size: ---</div>
+              </div>
+              <div id="updateActionButtons">
+                <button class="btn primary" id="downloadUpdateBtn" type="button" onclick="startUpdateDownload()">
+                  <span data-i="down"></span> Download & Install
+                </button>
+              </div>
+            </div>
+
+            <!-- Release Notes List -->
+            <div id="updateReleaseNotesBox" style="background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-top:10px">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-3);letter-spacing:0.5px;margin-bottom:6px">What is New:</div>
+              <ul id="updateReleaseNotesList" style="margin:0;padding-left:18px;font-size:12px;color:var(--ink-2);line-height:1.5">
+              </ul>
+            </div>
+
+            <!-- Download Progress Bar -->
+            <div id="updateProgressWrap" style="display:none;margin-top:12px">
+              <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:4px">
+                <span id="updateProgressLabel">Downloading update...</span>
+                <span id="updateProgressPct" style="font-family:var(--f-mono)">0%</span>
+              </div>
+              <div style="background:var(--recess);height:8px;border-radius:4px;overflow:hidden;border:1px solid var(--line)">
+                <div id="updateProgressBar" style="width:0%;height:100%;background:var(--pallet);transition:width 0.2s ease"></div>
+              </div>
+            </div>
+
+            <!-- Ready to Install Callout -->
+            <div id="updateReadyBox" style="display:none;margin-top:12px;background:var(--pallet-tint);border:1px solid var(--pallet-line, var(--pallet));border-radius:6px;padding:12px;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-weight:700;color:var(--pallet-ink);font-size:13px">Update Downloaded and Verified</div>
+                <div style="font-size:12px;color:var(--pallet-ink);opacity:0.85">SHA-256 integrity check passed. Click to restart and apply update.</div>
+              </div>
+              <button class="btn primary" id="applyUpdateBtn" type="button" onclick="confirmApplyUpdate()" style="background:var(--pallet);color:#fff">
+                Restart & Apply Now
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hardcoded default update source (hidden from operator UI) -->
+        <input type="hidden" id="manifestUrlInput" value="Guts1005/provenance">
+      </div>
+    </section>
+  </main>
+
+  <!-- DIALOG: VIDEO PROOF PLAYER -->
+  <dialog id="dPlayer" aria-labelledby="pTitle">
+    <div class="dlg dlg-player-wrapper">
+      <div class="dlg-header player-modal-header">
+        <div class="player-modal-title-group">
+          <h3 id="pTitle">Proof for PKG-000</h3>
+        </div>
+        <button class="modal-close-btn" onclick="closePlayerModal()" aria-label="Close proof player">
+          <span data-i="x"></span>
+        </button>
+      </div>
+
+      <div class="player player-layout-v2">
+        <!-- Left: Cinematic Video Viewport and Apple Transport Bar -->
+        <div class="player-stage">
+          <div class="pv player-viewport-v2">
+            <video id="modalVideoPlayer" playsinline preload="auto"></video>
+          </div>
+
+          <!-- Transport Dock -->
+          <div class="transport-dock">
+            <div class="transport-controls-left">
+              <!-- Play / Pause Circular Tactile Button -->
+              <button class="transport-play-btn" id="pPlay" aria-label="Play or Pause" onclick="togglePlayPause()">
+                <span id="pPlayIcon"></span>
+              </button>
+
+              <!-- Frame and Second Navigation Group -->
+              <div class="transport-step-group" role="group" aria-label="Playback frame navigation">
+                <button class="transport-step-btn" title="Rewind 1 second (J)" onclick="stepVideo(-1.0)">-1s</button>
+                <button class="transport-step-btn" title="Step back 1 frame (Left Arrow)" onclick="stepVideo(-0.04)">◀ 1f</button>
+                <button class="transport-step-btn" title="Step forward 1 frame (Right Arrow)" onclick="stepVideo(0.04)">1f ▶</button>
+                <button class="transport-step-btn" title="Forward 1 second (L)" onclick="stepVideo(1.0)">+1s</button>
+              </div>
+            </div>
+
+            <!-- Scrubber Timeline Track -->
+            <div class="sbar transport-timeline" id="sbar" role="slider" aria-label="Video scrubber" aria-valuemin="0" aria-valuemax="100">
+              <div class="fill" id="sfill"></div>
+              <div class="th" id="sth" style="left:0"></div>
+            </div>
+
+            <!-- Tabular Time Indicator -->
+            <div class="transport-time-pill">
+              <span id="pTime">00:00 / 00:00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Inspector Sidebar -->
+        <div class="player-inspector">
+          <!-- Card 1: Logistics and Recording Attributes -->
+          <div class="inspector-card">
+            <div class="inspector-card-header">
+              <span class="inspector-section-tag">Logistics & Session</span>
+            </div>
+            
+            <div class="inspector-field-list">
+              <div class="inspector-row">
+                <span class="inspector-label">Barcode</span>
+                <span class="mono inspector-val-pill" id="pCode">---</span>
+              </div>
+              <div class="inspector-row">
+                <span class="inspector-label">Order Ref</span>
+                <span class="inspector-val-text" id="pOrder">Not assigned</span>
+              </div>
+              <div class="inspector-row">
+                <span class="inspector-label">Carrier</span>
+                <span class="inspector-val-text" id="pCarrier">Not assigned</span>
+              </div>
+              <div class="inspector-row">
+                <span class="inspector-label">Station</span>
+                <span class="inspector-val-text" id="pStation">Station 1</span>
+              </div>
+              <div class="inspector-row">
+                <span class="inspector-label">Recorded At</span>
+                <span class="mono inspector-val-time" id="pAt">---</span>
+              </div>
+            </div>
+
+            <!-- Dual Metric Stat Grid -->
+            <div class="inspector-stats-grid">
+              <div class="inspector-stat-cell">
+                <span class="stat-cell-label">Duration</span>
+                <span class="stat-cell-val mono" id="pDur">00:00</span>
+              </div>
+              <div class="inspector-stat-cell">
+                <span class="stat-cell-label">File Size</span>
+                <span class="stat-cell-val mono" id="pSize">0 B</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Digital Fingerprint -->
+          <div class="inspector-card">
+            <div class="inspector-card-header">
+              <span class="inspector-section-tag">Digital Fingerprint</span>
+            </div>
+
+            <!-- Hash Container -->
+            <div class="hash-box">
+              <div class="hash-box-preview mono" id="pHashShort">e3b0c442...b97063f6</div>
+              <div class="mono full-hash-drawer" id="pHash">---</div>
+            </div>
+
+            <!-- Hash Action Buttons -->
+            <div class="hash-actions-row">
+              <button class="btn sm copy-hash-action" id="btnCopyHash" onclick="copyModalHash()">
+                <span data-i="copy"></span>
+                <span id="copyHashBtnText">Copy Hash</span>
+              </button>
+              <button class="btn sm quiet expand-hash-action" id="btnToggleFullHash" onclick="toggleFullHashView()">
+                Expand
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dialog Action Footer -->
+      <div class="dlg-actions player-modal-footer">
+        <div class="player-footer-left">
+          <button class="btn danger" id="pDelete" onclick="handleModalDeleteClick()">
+            <span data-i="trash"></span>Delete clip
+          </button>
+          <button class="btn" id="pEdit" onclick="handleModalEditClick()">
+            <span data-i="edit"></span>Edit metadata
+          </button>
+        </div>
+        <div class="player-footer-right">
+          <button class="btn primary" id="pRevealInExplorer" onclick="revealModalClipInExplorer()" title="Open Windows File Explorer and highlight this video file">
+            <span data-i="folder"></span>Show in Explorer
+          </button>
+          <button class="btn close-player-action" onclick="closePlayerModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- DIALOG: EDIT METADATA -->
+  <dialog id="dEdit" aria-labelledby="eTitle">
+    <div class="dlg" style="max-width:480px">
+      <div class="dlg-header">
+        <h3 id="eTitle">Edit Clip Metadata</h3>
+        <button class="btn sm quiet" onclick="closeEditMetadataModal()"><span data-i="x"></span></button>
+      </div>
+      <form id="editMetaForm" onsubmit="event.preventDefault(); saveSessionMetadata();">
+        <input type="hidden" id="editMetaSessionId" value="">
+        <div class="form-group" style="margin-top:10px">
+          <label class="lbl" for="editMetaBarcode">Barcode / Serial</label>
+          <input class="field plain" id="editMetaBarcode" required>
+        </div>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="form-group">
+            <label class="lbl" for="editMetaOrderId">Order / Invoice ID</label>
+            <input class="field plain" id="editMetaOrderId" placeholder="e.g. ORD-1042-A">
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="editMetaCarrier">Carrier / Courier</label>
+            <input class="field plain" id="editMetaCarrier" placeholder="e.g. FedEx / BlueDart">
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label class="lbl" for="editMetaNotes">Dispute & Packaging Notes</label>
+          <textarea class="field plain" id="editMetaNotes" rows="3" style="height:auto;resize:vertical" placeholder="e.g. 2x tamper seal intact before dispatch"></textarea>
+        </div>
+        <div class="dlg-actions">
+          <button type="button" class="btn" onclick="closeEditMetadataModal()">Cancel</button>
+          <button type="submit" class="btn primary"><span data-i="check"></span>Save changes</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- DIALOG: DELETE CONFIRMATION -->
+  <dialog id="dDelete" aria-labelledby="dTitle">
+    <div class="dlg" style="max-width:460px">
+      <h3 id="dTitle">Delete this clip?</h3>
+      <p id="dBody" style="margin-top:10px"></p>
+      <div class="dlg-actions">
+        <button class="btn" id="dCancel" onclick="closeDeleteModal()">Cancel</button>
+        <button class="btn solid-danger" id="dConfirm" onclick="executeSessionDeletion()"><span data-i="trash"></span>Delete clip</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- DIALOG: PRINT BENCH COMMAND PLACARD -->
+  <dialog id="printBarcodeModal" aria-labelledby="printTitle">
+    <div class="dlg" style="max-width:540px">
+      <div class="dlg-header">
+        <h3 id="printTitle">Packing Bench Command Barcode</h3>
+        <button class="btn sm quiet" onclick="closePrintBarcodeModal()"><span data-i="x"></span></button>
+      </div>
+      <p style="margin-top:6px;font-size:13px;color:var(--ink-2)">
+        Mount this placard on your packing bench or tape dispenser. Scanning this command barcode or QR code stops the active recording and finalizes video proof with <strong>zero keyboard or mouse touches</strong>.
+      </p>
+
+      <div class="placard-preview-box" style="margin:16px 0">
+        <img id="benchPlacardImg" src="/static/finish_bench_placard.png?v=1" alt="Finish Command Placard" class="placard-img">
+      </div>
+
+      <div style="display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin-bottom:12px">
+        <div><strong>Code-128:</strong> for 1D laser & CCD guns</div>
+        <div><strong>QR Code:</strong> for 2D camera & imager guns</div>
+      </div>
+
+      <div class="dlg-actions" style="justify-content:space-between">
+        <a class="btn" href="/static/finish_bench_placard.png" download="Provenance_Finish_Bench_Placard.png">
+          <span data-i="down"></span>Download PNG
+        </a>
+        <div style="display:flex;gap:10px">
+          <button class="btn" onclick="closePrintBarcodeModal()">Close</button>
+          <button class="btn primary" onclick="printBenchPlacard()"><span data-i="print"></span>Print Bench Sheet</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- TOAST NOTIFICATIONS -->
+  <div id="toasts" role="status" aria-live="polite"></div>
+
+  <script src="/static/app.js?v=36"></script>
+</body>
+</html>
