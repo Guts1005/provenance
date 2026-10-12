@@ -209,6 +209,23 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertFalse(resp_none["success"])
         self.assertIn("not found", resp_none["error"].lower())
 
+    def test_scan_available_cameras_structure(self):
+        cams = video_engine.scan_available_cameras()
+        self.assertIsInstance(cams, list)
+        self.assertGreater(len(cams), 0)
+        # Verify simulator is always included
+        sim = next((c for c in cams if c.get("id") == "simulator:demo"), None)
+        self.assertIsNotNone(sim)
+        self.assertEqual(sim["status"], "ready")
+
+    def test_resolve_camera_source_webcam_alias(self):
+        database.set_setting("camera_source", "webcam:2")
+        resolved = video_engine.resolve_camera_source("webcam")
+        self.assertEqual(resolved, "webcam:2")
+        database.set_setting("camera_source", "simulator:demo")
+        resolved_default = video_engine.resolve_camera_source("webcam")
+        self.assertEqual(resolved_default, "webcam:0")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

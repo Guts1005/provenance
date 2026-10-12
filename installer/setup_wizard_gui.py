@@ -15,7 +15,7 @@ import ctypes
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-INSTALLER_VERSION = "2.0.8"
+INSTALLER_VERSION = "2.0.9"
 
 # Resolve base directories
 if getattr(sys, "frozen", False):

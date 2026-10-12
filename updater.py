@@ -19,7 +19,7 @@ import urllib.error
 
 import database
 
-CURRENT_VERSION = "2.0.8"
+CURRENT_VERSION = "2.0.9"
 DEFAULT_UPDATE_SOURCE = "Guts1005/provenance"
 DEFAULT_MANIFEST_URL = DEFAULT_UPDATE_SOURCE
 

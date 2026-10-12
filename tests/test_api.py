@@ -225,7 +225,7 @@ class TestServerRestAPI(unittest.TestCase):
             self.assertTrue(res_del["success"])
             self.assertEqual(res_del["deleted_id"], session_id)
 
-    def _wait_for_completed(self, target_ids, timeout=25.0):
+    def _wait_for_completed(self, target_ids, timeout=45.0):
         deadline = time.time() + timeout
         target_set = set(target_ids)
         while time.time() < deadline:

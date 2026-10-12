@@ -51,6 +51,8 @@ def build_binary():
         "--hidden-import=bottle",
         "--hidden-import=sqlite3",
         "--hidden-import=numpy",
+        "--hidden-import=pygrabber",
+        "--hidden-import=pygrabber.dshow_graph",
         "main.py"
     ]
 

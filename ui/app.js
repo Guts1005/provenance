@@ -614,14 +614,18 @@
 
   window.quickSwitchCamera = async function (source) {
     try {
+      let targetSource = source;
+      if (source === "webcam" || source === "webcam:0") {
+        targetSource = window.activeWebcamSource || "webcam:0";
+      }
       const resp = await fetch("/api/camera/source", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: source })
+        body: JSON.stringify({ source: targetSource })
       });
       const data = await resp.json();
       if (data.success) {
-        const isRtsp = source === "rtsp";
+        const isRtsp = targetSource === "rtsp" || targetSource.startsWith("rtsp://");
         $("#srcRtspBtn")?.setAttribute("aria-pressed", isRtsp);
         $("#srcWebcamBtn")?.setAttribute("aria-pressed", !isRtsp);
         toast("ok", "Camera switched to " + (isRtsp ? "CCTV RTSP" : "Webcam"));
@@ -1836,7 +1840,7 @@
           const opt = document.createElement("option");
           opt.value = dev.id;
           opt.textContent = `${dev.name} [${dev.resolution || 'Auto'}] (${dev.status || 'ready'})`;
-          if (dev.id === data.current_source) opt.selected = true;
+          if (dev.id === (window.activeWebcamSource || data.current_source)) opt.selected = true;
           sel.appendChild(opt);
         });
         toast("ok", `Discovered ${data.devices.length} camera source(s)`);
@@ -1852,6 +1856,7 @@
     if (val === "rtsp" || val.startsWith("rtsp://")) {
       setConfigCameraSource("rtsp");
     } else {
+      window.activeWebcamSource = val;
       setConfigCameraSource(val);
     }
   };
@@ -1903,7 +1908,9 @@
   window.saveSettings = async function () {
     const isRtsp = $("#radioSourceRtsp")?.getAttribute("aria-pressed") === "true";
     const rtspUrl = $("#rtspUrlInput")?.value.trim();
-    const source = isRtsp ? (rtspUrl || "rtsp") : "webcam:0";
+    const detectedCam = $("#detectedCamerasSelect")?.value;
+    const chosenWebcam = (detectedCam && detectedCam.startsWith("webcam:")) ? detectedCam : (window.activeWebcamSource || "webcam:0");
+    const source = isRtsp ? (rtspUrl || "rtsp") : chosenWebcam;
     const stationId = $("#stationIdInput")?.value.trim() || "Station 1";
     const timeout = parseInt($("#timeoutInput")?.value) || 300;
     const clipsDir = $("#clipsDirInput")?.value.trim();
@@ -1911,7 +1918,7 @@
     const updateSource = $("#updateSourceInput")?.value?.trim() || $("#manifestUrlInput")?.value?.trim() || "Guts1005/provenance";
 
     const payload = {
-      camera_source: isRtsp ? "rtsp" : "webcam:0",
+      camera_source: source,
       rtsp_url: rtspUrl,
       station_id: stationId,
       idle_timeout_seconds: timeout,
@@ -1947,7 +1954,7 @@
 
   window.renderUpdateStatusUI = async function renderUpdateStatusUI(statusData) {
     if (!statusData) return;
-    const curVer = statusData.current_version || "2.0.7";
+    const curVer = statusData.current_version || "2.0.9";
     if ($("#updateVersionBadge")) {
       $("#updateVersionBadge").textContent = "Current: v" + curVer;
     }
@@ -2265,8 +2272,11 @@
 
         parseRtspToInputs(conf.rtsp_url);
 
+        if (conf.camera_source && conf.camera_source.startsWith("webcam:")) {
+          window.activeWebcamSource = conf.camera_source;
+        }
         const isRtsp = conf.camera_source === "rtsp" || (conf.camera_source && conf.camera_source.startsWith("rtsp://"));
-        setConfigCameraSource(isRtsp ? "rtsp" : "webcam:0");
+        setConfigCameraSource(isRtsp ? "rtsp" : (window.activeWebcamSource || "webcam:0"));
         scanAvailableCameras();
 
         // Auto-check for updates on launch

@@ -28,7 +28,7 @@ CLIPS_DIR = database.CLIPS_DIR
 
 def resolve_camera_source(source: Optional[str]) -> str:
     """
-    Resolve camera source alias like 'rtsp' to the configured database rtsp_url.
+    Resolve camera source alias like 'rtsp' or 'webcam' to the configured database source.
     Preserves 'webcam:0', 'simulator:demo', or direct 'rtsp://...' URLs.
     """
     clean = (source or "webcam:0").strip()
@@ -36,6 +36,11 @@ def resolve_camera_source(source: Optional[str]) -> str:
         rtsp_url = database.get_setting("rtsp_url", "").strip()
         if rtsp_url:
             return rtsp_url
+    elif clean.lower() == "webcam":
+        saved_cam = database.get_setting("camera_source", "webcam:0").strip()
+        if saved_cam.startswith("webcam:"):
+            return saved_cam
+        return "webcam:0"
     return clean
 
 
@@ -282,43 +287,61 @@ def test_rtsp_connection(url: str, timeout: float = 2.5) -> Dict[str, Any]:
         }
 
 
-def scan_available_cameras(max_probe: int = 4) -> list:
+def scan_available_cameras(max_probe: int = 5) -> list:
     """
-    Enumerate physical USB/DirectShow webcams and probe saved CCTV RTSP camera.
+    Enumerate physical USB/DirectShow webcams with real hardware friendly names
+    and probe saved CCTV RTSP camera.
     Returns list of discovered camera descriptors with resolution and capability info.
     """
     devices = []
+    friendly_names = {}
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+        graph = FilterGraph()
+        dev_list = graph.get_input_devices()
+        for i, name in enumerate(dev_list):
+            friendly_names[i] = name
+    except Exception:
+        pass
 
-    # 1. Probe local DirectShow / USB webcams
-    for idx in range(max_probe):
-        try:
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(idx)
-            if cap.isOpened():
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
-                fps = round(cap.get(cv2.CAP_PROP_FPS) or 25.0, 1)
+    probe_count = max(max_probe, len(friendly_names))
+    backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW] if os.name == "nt" else [cv2.CAP_ANY]
 
-                # Test if 1080p can be negotiated
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-                opt_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or w
-                opt_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or h
+    # 1. Probe local webcams
+    for idx in range(probe_count):
+        hw_name = friendly_names.get(idx)
+        is_ready = False
+        res_str = "1280x720"
+        fps_val = 30.0
 
-                cap.release()
-                devices.append({
-                    "id": f"webcam:{idx}",
-                    "type": "webcam",
-                    "index": idx,
-                    "name": f"USB / Integrated Camera (Device {idx})",
-                    "resolution": f"{opt_w}x{opt_h}",
-                    "fps": fps,
-                    "status": "ready"
-                })
-        except Exception:
-            pass
+        for api in backends:
+            try:
+                cap = cv2.VideoCapture(idx, api)
+                if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
+                    f = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                    if 0 < f <= 60:
+                        fps_val = round(f, 1)
+                    res_str = f"{w}x{h}"
+                    is_ready = True
+                    cap.release()
+                    break
+            except Exception:
+                pass
+
+        if is_ready or (hw_name is not None):
+            name_label = hw_name if hw_name else f"Camera (Device {idx})"
+            devices.append({
+                "id": f"webcam:{idx}",
+                "type": "webcam",
+                "index": idx,
+                "name": name_label,
+                "resolution": res_str,
+                "fps": fps_val,
+                "status": "ready" if is_ready else "busy"
+            })
 
     # 2. Probe configured RTSP camera if present
     try:
@@ -889,40 +912,59 @@ class VideoEngine:
                 idx = int(source.split(":")[1])
             except (IndexError, ValueError):
                 idx = 0
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(idx)
 
-            # Auto-scan fallback: if configured webcam index fails, probe other connected webcam ports
-            if not cap.isOpened():
-                for alt_idx in range(4):
+            cap = None
+            backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW] if os.name == "nt" else [cv2.CAP_ANY]
+
+            # Primary attempt on requested index: prioritize hardware MSMF on Windows for 30 FPS
+            for api in backends:
+                try:
+                    c = cv2.VideoCapture(idx, api)
+                    if c.isOpened():
+                        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        c.set(cv2.CAP_PROP_FPS, 30.0)
+                        # Optimal 1280x720 eliminates USB bus saturation and drops frame latency to <20ms
+                        c.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                        ok, test_frame = c.read()
+                        if ok and test_frame is not None:
+                            cap = c
+                            break
+                        else:
+                            c.release()
+                except Exception:
+                    pass
+
+            # Auto-fallback: if requested index fails or is locked, probe alternate webcam ports
+            if cap is None:
+                for alt_idx in range(5):
                     if alt_idx == idx:
                         continue
-                    alt_cap = cv2.VideoCapture(alt_idx, cv2.CAP_DSHOW)
-                    if not alt_cap.isOpened():
-                        alt_cap = cv2.VideoCapture(alt_idx)
-                    if alt_cap.isOpened():
-                        cap = alt_cap
-                        idx = alt_idx
+                    for api in backends:
+                        try:
+                            alt_c = cv2.VideoCapture(alt_idx, api)
+                            if alt_c.isOpened():
+                                alt_c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                                alt_c.set(cv2.CAP_PROP_FPS, 30.0)
+                                alt_c.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                                alt_c.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                                ok, test_frame = alt_c.read()
+                                if ok and test_frame is not None:
+                                    cap = alt_c
+                                    idx = alt_idx
+                                    break
+                                else:
+                                    alt_c.release()
+                        except Exception:
+                            pass
+                    if cap is not None:
                         break
 
-            if cap.isOpened():
+            if cap is not None and cap.isOpened():
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                # Auto-optimize format and resolution: MJPG delivers highest FPS over USB
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-                cap.set(cv2.CAP_PROP_FPS, 25)
-
-                # Validate negotiated sensor dimensions
-                curr_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 0
-                if curr_w < 1280:
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
                 ll_cap = LowLatencyCapture(cap)
-                # Wait up to 2.0s for first frame
-                for _ in range(100):
+                # Wait up to 1.5s for initial valid frame
+                for _ in range(75):
                     ok, _ = ll_cap.read_latest()
                     if ok:
                         break
